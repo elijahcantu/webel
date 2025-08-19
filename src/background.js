@@ -201,7 +201,7 @@ function exportToXES(traces) {
     body += `<trace>\n<string key="concept:name" value="${traceId}"/>\n`;
     for (let event of trace.events || []) {
       body += `<event>\n`;
-      body += `<string key="concept:name" value="${event.url}"/>\n`;
+      body += `<string key="concept:name" value="${event.url.replace(/&/g, "&amp;")}"/>\n`;
       body += `<string key="transition" value="${event.transition}"/>\n`;
       body += `<date key="time:timestamp" value="${event.time}"/>\n`;
       if (event.tabId) {
