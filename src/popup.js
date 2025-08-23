@@ -1,14 +1,20 @@
 document.addEventListener('DOMContentLoaded', () => {
   chrome.storage.local.get(['loggingEnabled'], (data) => {
     const loggingEnabled = data.loggingEnabled !== false;
-    document.getElementById('logging-toggle').checked = loggingEnabled;
+    const toggle = document.getElementById('logging-toggle');
+    const label = document.querySelector('.toggle-label');
+
+    toggle.checked = loggingEnabled;
+    label.textContent = loggingEnabled ? 'logging on' : 'logging off';
   });
 });
 
 
 document.getElementById('logging-toggle').addEventListener('change', (e) => {
   const isEnabled = e.target.checked;
+  const label = document.querySelector('.toggle-label');
 
+  label.textContent = isEnabled ? 'logging on' : 'logging off';
   chrome.storage.local.set({
     loggingEnabled: isEnabled,
   }, () => {
