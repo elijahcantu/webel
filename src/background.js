@@ -38,7 +38,7 @@ function isLoggingEnabled(callback) {
 function showReminderNotification() {
   chrome.action.setBadgeText({ text: '!' });
   chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
-  
+
   // Create a notification (requires notification permission)
   if (chrome.notifications) {
     chrome.notifications.create({
@@ -64,14 +64,14 @@ if (chrome.notifications) {
       });
     }
   });
-  
 
-  
+
+
 }
 
 // Cleanup stale tabs on startup or service worker reload
 chrome.runtime.onStartup.addListener(() => {
-  
+
   getStorage(({ traces, tabTraceMap }) => {
     chrome.tabs.query({}, (tabs) => {
       const openTabIds = new Set(tabs.map(t => t.id));
@@ -97,56 +97,66 @@ chrome.runtime.onStartup.addListener(() => {
 
 
 // Listen for history deletion
-chrome.history.onVisitRemoved.addListener(function(removed) {
+chrome.history.onVisitRemoved.addListener(function (removed) {
   chrome.storage.local.get(['loggingEnabled'], (data) => {
     if (!data.loggingEnabled) {
       showReminderNotification();
     }
   });
 });
+function isNewTabURL(url = "") {
+  return (
+    url === "chrome://newtab/" ||
+    url === "chrome://new-tab-page/" ||
+    url.startsWith("chrome-untrusted://new-tab-page/")
+  );
+}
 
-// Track new tab creation and inherit trace from opener
 chrome.tabs.onCreated.addListener((tab) => {
   isLoggingEnabled((enabled) => {
     if (!enabled) return;
-    
+
+    const candidate = tab.url || tab.pendingUrl || "";
+    if (isNewTabURL(candidate)) {
+      console.log("Skip inheritance for NTP tab:", tab.id, candidate);
+      return; // new tab will get its own trace in onUpdated
+    }
+
     getStorage(({ traces, tabTraceMap }) => {
       const openerTabId = tab.openerTabId;
-
-      // Only try to inherit trace if opener exists and has a trace
       if (openerTabId && tabTraceMap[openerTabId] && !tabTraceMap[tab.id]) {
         const parentTraceId = tabTraceMap[openerTabId];
         const oldTraceId = tabTraceMap[tab.id];
         tabTraceMap[tab.id] = parentTraceId;
         logTraceChange("onCreated", tab.id, oldTraceId, parentTraceId);
 
-        // Add tab to trace's tab list
         if (traces[parentTraceId] && !traces[parentTraceId].tabIds.includes(tab.id)) {
           traces[parentTraceId].tabIds.push(tab.id);
         }
 
-        console.log("Tab inherited trace from opener:", tab.id, "from", openerTabId, "trace:", parentTraceId);
-        setStorage(traces, tabTraceMap, "onCreated");
+        chrome.storage.local.set({ traces, tabTraceMap }, () => {
+          console.log("Inherited trace for child tab", tab.id);
+        });
       } else {
-        // No trace inheritance; new trace will be created later on URL update
         console.log("New tab created without trace inheritance:", tab.id);
       }
     });
   });
 });
 
-// Track new tabs and navigations
+
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (!changeInfo.url) return; // Only proceed when URL is available
+  if (!changeInfo.url) return;
 
   isLoggingEnabled((enabled) => {
     if (!enabled) return;
-    
-    getStorage(({ traces, tabTraceMap }) => {
-      const isManualNewTab = changeInfo.url === 'chrome://newtab/';
-      console.log("changeinfo.url ", changeInfo.url, "tabId ", tabId);
 
-      // If tab is not already tracked OR is a manual new tab → create new trace
+    getStorage(({ traces, tabTraceMap }) => {
+      const url = changeInfo.url;
+      const isManualNewTab = isNewTabURL(url);
+
+      console.log("changeinfo.url ", url, "tabId ", tabId);
+
       if (!tabTraceMap[tabId] || isManualNewTab) {
         const newTraceId = crypto.randomUUID();
         const oldTraceId = tabTraceMap[tabId];
@@ -154,19 +164,18 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         tabTraceMap[tabId] = newTraceId;
         logTraceChange("onUpdated", tabId, oldTraceId, newTraceId);
 
-        console.log("New trace created:", tabId, newTraceId, changeInfo.url);
+        console.log("New trace created:", tabId, newTraceId, url);
       }
 
       const traceId = tabTraceMap[tabId];
       if (traces[traceId]) {
         traces[traceId].events.push({
           time: new Date().toISOString(),
-          url: changeInfo.url,
+          url,
           transition: changeInfo.transitionType,
-          tabId: tabId
+          tabId,
         });
-
-        console.log("Event added to trace:", tabId, traceId, changeInfo.url);
+        console.log("Event added to trace:", tabId, traceId, url);
       }
 
       setStorage(traces, tabTraceMap, "onUpdated");
@@ -174,11 +183,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   });
 });
 
+
 // Track tab removal
 chrome.tabs.onRemoved.addListener((tabId) => {
   isLoggingEnabled((enabled) => {
     if (!enabled) return;
-    
+
     getStorage(({ traces, tabTraceMap }) => {
       const traceId = tabTraceMap[tabId];
       if (traceId && traces[traceId]) {
@@ -223,7 +233,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true; // async response
   }
-  
+
   if (msg.action === "loggingToggled") {
     if (msg.enabled) {
       chrome.action.setBadgeText({ text: '' });
@@ -233,32 +243,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 chrome.webNavigation.onCommitted.addListener((details) => {
-  if (details.url === 'chrome://newtab/') {
-    console.log("Skipping onCommitted for chrome://newtab/");
+  // Skip NTP noise
+  if (isNewTabURL(details.url)) {
+    console.log("Skipping onCommitted for New Tab URL:", details.url);
     return;
   }
-  
+
+  // Optional: only top-level navigations to reduce noise/races
+  if (details.frameId !== 0) return;
+
   isLoggingEnabled((enabled) => {
     if (!enabled) return;
-    
-    getStorage(({ traces, tabTraceMap }) => {
-      const traceId = tabTraceMap[details.tabId];
 
-      // Check if a valid trace exists before making any changes
+    chrome.storage.local.get(["traces", "tabTraceMap"], ({ traces = {}, tabTraceMap = {} }) => {
+      const traceId = tabTraceMap[details.tabId];
       if (!traceId || !traces[traceId]) return;
 
-      // If the tab already has a valid trace, continue adding the event
-      if (!traces[traceId].events) traces[traceId].events = [];
-
-      traces[traceId].events.push({
+      (traces[traceId].events ||= []).push({
         time: new Date(details.timeStamp).toISOString(),
         url: details.url,
         transition: details.transitionType,
-        tabId: details.tabId // Optional: track which specific tab the event came from
+        tabId: details.tabId,
       });
 
-      console.log("Navigation committed:", details);
-      setStorage(traces, tabTraceMap, "onCommitted");
+      // IMPORTANT: update ONLY traces to avoid clobbering a newer tabTraceMap
+      chrome.storage.local.set({ traces }, () => {
+        console.log("Navigation committed (top-level), event appended");
+      });
     });
   });
 });
