@@ -18,7 +18,7 @@ nav_order: 3
     /* custom.css */
 .responsive-video {
   position: relative;
-  padding-bottom: 64.9%; 
+  padding-bottom: 64.95%; 
   height: 0;
   overflow: hidden;
   max-width: 100%;
