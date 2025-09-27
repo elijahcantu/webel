@@ -64,3 +64,12 @@ button {
 }
 
 
+.control-section button {
+    display: block;         /* Ensures each button is on its own line */
+    margin-bottom: 5px;    /* Adds vertical spacing between buttons */
+  }
+
+  /* Optional: Remove bottom margin from the last button */
+  .control-section button:last-child {
+    margin-bottom: 0;
+  }

@@ -4,21 +4,24 @@ chrome.runtime.onInstalled.addListener(() => {
     console.log("loggingEnabled set to true on install.");
   });
 });
+
 // Helper: get current storage state
 function getStorage(callback) {
-  chrome.storage.local.get(["traces", "tabTraceMap", "loggingEnabled"], (data) => {
+  chrome.storage.local.get(["traces", "tabTraceMap", "loggingEnabled", "tabTraces", "sessionTraces"], (data) => {
     callback({
       traces: data.traces || {},
       tabTraceMap: data.tabTraceMap || {},
       loggingEnabled: data.loggingEnabled !== false, // Default to true
+      tabTraces: data.tabTraces || {}, // --- [Per-Tab Trace Logging] ---
+      sessionTraces: data.sessionTraces || {},
     });
   });
 }
 
 // Helper: save storage state
-function setStorage(traces, tabTraceMap, source = "unknown") {
-  chrome.storage.local.set({ traces, tabTraceMap }, () => {
-    console.log(`[Storage Updated - ${source}]`, { traces, tabTraceMap });
+function setStorage(traces, tabTraceMap, tabTraces, sessionTraces, source = "unknown",) {
+  chrome.storage.local.set({ traces, tabTraceMap, tabTraces, sessionTraces }, () => {
+    console.log(`[Storage Updated - ${source}]`, { traces, tabTraceMap, tabTraces, sessionTraces });
   });
 }
 
@@ -72,9 +75,15 @@ if (chrome.notifications) {
 // Cleanup stale tabs on startup or service worker reload
 chrome.runtime.onStartup.addListener(() => {
 
-  getStorage(({ traces, tabTraceMap }) => {
+  getStorage(({ traces, tabTraceMap, tabTraces, sessionTraces }) => {
+    const currentSessionId = crypto.randomUUID();
+    sessionTraces[currentSessionId] = { traceId: currentSessionId, events: [] };
+    chrome.storage.local.set({ currentSessionId }, () => {
+      console.log("Session initialized:", currentSessionId);
+    });
     chrome.tabs.query({}, (tabs) => {
       const openTabIds = new Set(tabs.map(t => t.id));
+
       for (let tabId in tabTraceMap) {
         if (!openTabIds.has(Number(tabId))) {
           const traceId = tabTraceMap[tabId];
@@ -84,7 +93,7 @@ chrome.runtime.onStartup.addListener(() => {
           delete tabTraceMap[tabId];
         }
       }
-      setStorage(traces, tabTraceMap, "initializeStorage");
+      setStorage(traces, tabTraceMap, tabTraces, sessionTraces, "initializeStorage",);
     });
   });
   chrome.storage.local.get(['loggingEnabled'], (data) => {
@@ -122,7 +131,7 @@ chrome.tabs.onCreated.addListener((tab) => {
       return; // new tab will get its own trace in onUpdated
     }
 
-    getStorage(({ traces, tabTraceMap }) => {
+    getStorage(({ traces, tabTraceMap, tabTraces }) => {
       const openerTabId = tab.openerTabId;
       if (openerTabId && tabTraceMap[openerTabId] && !tabTraceMap[tab.id]) {
         const parentTraceId = tabTraceMap[openerTabId];
@@ -140,6 +149,7 @@ chrome.tabs.onCreated.addListener((tab) => {
       } else {
         console.log("New tab created without trace inheritance:", tab.id);
       }
+
     });
   });
 });
@@ -151,7 +161,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   isLoggingEnabled((enabled) => {
     if (!enabled) return;
 
-    getStorage(({ traces, tabTraceMap }) => {
+    getStorage(({ traces, tabTraceMap, tabTraces, sessionTraces }) => {
       const url = changeInfo.url;
       const isManualNewTab = isNewTabURL(url);
 
@@ -166,6 +176,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
         console.log("New trace created:", tabId, newTraceId, url);
       }
+      if (!tabTraces[tabId] || isManualNewTab) {
+        const newTraceId = crypto.randomUUID();
+        tabTraces[tab.id] = { traceId: newTraceId, events: [] };
+      }
 
       const traceId = tabTraceMap[tabId];
       if (traces[traceId]) {
@@ -178,8 +192,45 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         console.log("Event added to trace:", tabId, traceId, url);
       }
 
-      setStorage(traces, tabTraceMap, "onUpdated");
+      // --- [Per-Tab Trace Logging] ---
+      if (tabTraces[tabId]) {
+        tabTraces[tabId].events.push({
+          time: new Date().toISOString(),
+          url,
+          transition: changeInfo.transitionType,
+          tabId,
+        });
+        console.log("Event added to per-tab trace:", tabId, url);
+      }
+
+      chrome.storage.local.get('currentSessionId', (data) => {
+        let currentSessionId = data.currentSessionId;
+
+        if (!currentSessionId) {
+          // generate a new session ID if none exists
+          currentSessionId = crypto.randomUUID();
+          data.currentSessionId = currentSessionId;
+          sessionTraces[currentSessionId] = { events: [] };
+          chrome.storage.local.set({ currentSessionId }); // save new session
+        } else if (!sessionTraces[currentSessionId]) {
+          // create a session trace object if the ID exists but no trace
+          sessionTraces[currentSessionId] = { events: [] };
+        }
+
+        // now we can safely push the event
+        sessionTraces[currentSessionId].events.push({
+          time: new Date().toISOString(),
+          url,
+          transition: changeInfo.transitionType,
+          tabId,
+        });
+
+        console.log("Event added to session trace:", tabId, url);
+        setStorage(traces, tabTraceMap, tabTraces, sessionTraces, "onUpdated");
+      });
+
     });
+
   });
 });
 
@@ -189,14 +240,14 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   isLoggingEnabled((enabled) => {
     if (!enabled) return;
 
-    getStorage(({ traces, tabTraceMap }) => {
+    getStorage(({ traces, tabTraceMap, tabTraces, sessionTraces }) => {
       const traceId = tabTraceMap[tabId];
       if (traceId && traces[traceId]) {
         traces[traceId].tabIds = traces[traceId].tabIds.filter(id => id !== tabId);
         delete tabTraceMap[tabId];
-        setStorage(traces, tabTraceMap, "onRemoved");
         console.log("Tab removed:", tabId, traceId);
       }
+      setStorage(traces, tabTraceMap, tabTraces, sessionTraces, "onRemoved");
     });
   });
 });
@@ -225,6 +276,55 @@ function exportToXES(traces) {
   return header + "\n" + body + footer;
 }
 
+// --- [Per-Tab Trace Logging] separate export ---
+function exportPerTabXES(tabTraces) {
+  let header = `<?xml version="1.0" encoding="UTF-8" ?>\n<log xes.version="1.0" xmlns="http://www.xes-standard.org/">`;
+  let footer = `</log>`;
+  let body = "";
+
+  for (let [tabId, trace] of Object.entries(tabTraces)) {
+    body += `<trace>\n<string key="concept:name" value="${trace.traceId}"/>\n`;
+    for (let event of trace.events || []) {
+      body += `<event>\n`;
+      body += `<string key="concept:name" value="${event.url.replace(/&/g, "&amp;")}"/>\n`;
+      body += `<string key="transition" value="${event.transition}"/>\n`;
+      body += `<date key="time:timestamp" value="${event.time}"/>\n`;
+      if (event.tabId) {
+        body += `<int key="tabId" value="${event.tabId}"/>\n`;
+      }
+      body += `</event>\n`;
+    }
+    body += `</trace>\n`;
+  }
+
+  return header + "\n" + body + footer;
+}
+
+// --- [Session Trace Logging] export ---
+function exportSessionXES(sessionTraces) {
+  let header = `<?xml version="1.0" encoding="UTF-8" ?>\n<log xes.version="1.0" xmlns="http://www.xes-standard.org/">`;
+  let footer = `</log>`;
+  let body = "";
+
+  for (let [sessionId, trace] of Object.entries(sessionTraces)) {
+    body += `<trace>\n<string key="concept:name" value="${sessionId}"/>\n`;
+    for (let event of trace.events || []) {
+      body += `<event>\n`;
+      body += `<string key="concept:name" value="${event.url.replace(/&/g, "&amp;")}"/>\n`;
+      body += `<string key="transition" value="${event.transition}"/>\n`;
+      body += `<date key="time:timestamp" value="${event.time}"/>\n`;
+      if (event.tabId) {
+        body += `<int key="tabId" value="${event.tabId}"/>\n`;
+      }
+      body += `</event>\n`;
+    }
+    body += `</trace>\n`;
+  }
+
+  return header + "\n" + body + footer;
+}
+
+
 // Listen for popup messages
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "exportXES") {
@@ -233,6 +333,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true; // async response
   }
+
+  // --- [Per-Tab Trace Logging] export request ---
+  if (msg.action === "exportPerTabXES") {
+    getStorage(({ tabTraces }) => {
+      sendResponse(exportPerTabXES(tabTraces));
+    });
+    return true; // async response
+  }
+  if (msg.action === "exportSessionXES") {
+    getStorage(({ sessionTraces }) => {
+      sendResponse(exportSessionXES(sessionTraces));
+    });
+    return true; // async response
+  }
+
+
 
   if (msg.action === "loggingToggled") {
     if (msg.enabled) {
@@ -255,20 +371,48 @@ chrome.webNavigation.onCommitted.addListener((details) => {
   isLoggingEnabled((enabled) => {
     if (!enabled) return;
 
-    chrome.storage.local.get(["traces", "tabTraceMap"], ({ traces = {}, tabTraceMap = {} }) => {
+    chrome.storage.local.get([
+      "traces", "tabTraceMap", "tabTraces", "sessionTraces", "currentSessionId"
+    ], ({ traces = {}, tabTraceMap = {}, tabTraces = {}, sessionTraces = {}, currentSessionId }) => {
+      const currentTime = new Date(details.timeStamp).toISOString();
+
+      // Original parent/child trace logic (unchanged)
       const traceId = tabTraceMap[details.tabId];
-      if (!traceId || !traces[traceId]) return;
+      if (traceId && traces[traceId]) {
+        (traces[traceId].events ||= []).push({
+          time: currentTime,
+          url: details.url,
+          transition: details.transitionType,
+          tabId: details.tabId,
+        });
+        console.log("Navigation committed (parent/child), event appended");
+      }
 
-      (traces[traceId].events ||= []).push({
-        time: new Date(details.timeStamp).toISOString(),
-        url: details.url,
-        transition: details.transitionType,
-        tabId: details.tabId,
-      });
+      // Tab trace logic
+      if (tabTraces[details.tabId]) {
+        (tabTraces[details.tabId].events ||= []).push({
+          time: currentTime,
+          url: details.url,
+          transition: details.transitionType,
+          tabId: details.tabId,
+        });
+        console.log("Navigation committed (tab trace), event appended");
+      }
 
-      // IMPORTANT: update ONLY traces to avoid clobbering a newer tabTraceMap
-      chrome.storage.local.set({ traces }, () => {
-        console.log("Navigation committed (top-level), event appended");
+      // Session trace logic
+      if (currentSessionId && sessionTraces[currentSessionId]) {
+        (sessionTraces[currentSessionId].events ||= []).push({
+          time: currentTime,
+          url: details.url,
+          transition: details.transitionType,
+          tabId: details.tabId,
+        });
+        console.log("Navigation committed (session trace), event appended");
+      }
+
+      // Update storage with all traces
+      chrome.storage.local.set({ traces, tabTraces, sessionTraces }, () => {
+        console.log("All navigation traces updated from onCommitted");
       });
     });
   });
