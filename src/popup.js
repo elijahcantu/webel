@@ -26,14 +26,31 @@ document.getElementById('logging-toggle').addEventListener('change', (e) => {
   });
 });
 
+
+function downloadFile(content, filename) {
+  let blob = new Blob([content], { type: "application/xes" });
+  let url = URL.createObjectURL(blob);
+  let a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 document.getElementById("export").addEventListener("click", () => {
   chrome.runtime.sendMessage({ action: "exportXES" }, (xes) => {
-    let blob = new Blob([xes], { type: "application/xes" });
-    let url = URL.createObjectURL(blob);
-    let a = document.createElement("a");
-    a.href = url;
-    a.download = "traces.xes";
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadFile(xes, "traces.xes");
+  });
+});
+
+document.getElementById("export-per-tab").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ action: "exportPerTabXES" }, (xes) => {
+    downloadFile(xes, "per_tab_traces.xes");
+  });
+});
+
+document.getElementById("export-session").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ action: "exportSessionXES" }, (xes) => {
+    downloadFile(xes, "session_traces.xes");
   });
 });
