@@ -54,3 +54,42 @@ document.getElementById("export-session").addEventListener("click", () => {
     downloadFile(xes, "session_traces.xes");
   });
 });
+
+
+
+document.getElementById("sync-drive").addEventListener("click", () => {
+  const folderId = document.getElementById("drive-folder-id").value.trim();
+
+  // Save it persistently before syncing
+  chrome.storage.local.set({ driveFolderId: folderId });
+
+  chrome.runtime.sendMessage(
+    { action: "syncToDrive", folderId: folderId || null },
+    (response) => {
+      if (response?.success) {
+        alert("✅ Files uploaded successfully to Google Drive!");
+      } else {
+        alert("❌ Drive sync failed: " + (response?.error || "unknown error"));
+      }
+    }
+  );
+});
+
+
+
+// --- Restore saved Drive folder ID when popup loads ---
+document.addEventListener("DOMContentLoaded", () => {
+  // existing logging toggle restore code is already here — keep it
+
+  chrome.storage.local.get(["driveFolderId"], (data) => {
+    if (data.driveFolderId) {
+      document.getElementById("drive-folder-id").value = data.driveFolderId;
+    }
+  });
+});
+
+// --- Save folder ID on change ---
+document.getElementById("drive-folder-id").addEventListener("input", (e) => {
+  const folderId = e.target.value.trim();
+  chrome.storage.local.set({ driveFolderId: folderId });
+});

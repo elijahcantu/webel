@@ -356,6 +356,124 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     console.log("Logging toggled:", msg.enabled);
   }
+
+
+  if (msg.action === "syncToDrive") {
+    let folderId = msg.folderId;
+
+    // Extract folder ID if a URL was pasted
+    if (folderId.includes("drive.google.com")) {
+      const match = folderId.match(/[-\w]{25,}/);
+      folderId = match ? match[0] : null;
+    }
+
+    if (!folderId) {
+      sendResponse({ success: false, error: "Invalid folder ID or URL." });
+      return true;
+    }
+
+    getStorage(({ traces, tabTraces, sessionTraces }) => {
+      const xesParent = exportToXES(traces);
+      const xesPerTab = exportPerTabXES(tabTraces);
+      const xesSession = exportSessionXES(sessionTraces);
+
+      function uploadFileToDrive(token, filename, content, parentFolderId) {
+        const metadata = {
+          name: filename,
+          mimeType: 'application/xes+xml',
+          parents: [parentFolderId], // upload into the new timestamp folder
+        };
+
+        const boundary = '-------314159265358979323846';
+        const delimiter = `\r\n--${boundary}\r\n`;
+        const closeDelimiter = `\r\n--${boundary}--`;
+
+        const multipartRequestBody =
+          delimiter +
+          'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+          JSON.stringify(metadata) +
+          delimiter +
+          'Content-Type: application/xes+xml\r\n\r\n' +
+          content +
+          closeDelimiter;
+
+        return fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'multipart/related; boundary=' + boundary,
+          },
+          body: multipartRequestBody,
+        }).then((res) => res.json());
+      }
+
+
+      function getAndUseToken(interactive = false) {
+        chrome.identity.getAuthToken({ interactive }, async (token) => {
+          if (chrome.runtime.lastError || !token) {
+            console.error("❌ Auth error:", chrome.runtime.lastError);
+            if (!interactive) {
+              console.log("Retrying interactively...");
+              return getAndUseToken(true); // ask user to log in
+            }
+            sendResponse({ success: false, error: "Google authentication failed." });
+            return;
+          }
+
+          console.log("✅ Got OAuth token:", token);
+
+          try {
+            // 1️⃣ Create timestamped folder inside the provided folderId
+            const timestamp = new Date().toISOString().replace(/[:.]/g, "-"); // safe for filenames
+            const folderMetadata = {
+              name: timestamp,
+              mimeType: "application/vnd.google-apps.folder",
+              parents: [folderId],
+            };
+
+            const folderRes = await fetch("https://www.googleapis.com/drive/v3/files", {
+              method: "POST",
+              headers: {
+                Authorization: "Bearer " + token,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(folderMetadata),
+            });
+
+            const folderData = await folderRes.json();
+
+            if (!folderData.id) {
+              throw new Error("Failed to create timestamped folder");
+            }
+
+            console.log("📁 Created subfolder:", folderData);
+
+            const subfolderId = folderData.id;
+
+            // 2️⃣ Upload the three files into the timestamped subfolder
+            const uploaded1 = await uploadFileToDrive(token, "traces.xes", xesParent, subfolderId);
+            const uploaded2 = await uploadFileToDrive(token, "per_tab_traces.xes", xesPerTab, subfolderId);
+            const uploaded3 = await uploadFileToDrive(token, "session_traces.xes", xesSession, subfolderId);
+
+            console.log("✅ Uploaded:", uploaded1, uploaded2, uploaded3);
+            sendResponse({ success: true });
+          } catch (err) {
+            console.error("❌ Upload failed:", err);
+            sendResponse({ success: false, error: err.message });
+          }
+        });
+      }
+
+
+
+
+      // Start authentication + upload
+      getAndUseToken();
+    });
+
+    return true; // Keep message port open
+  }
+
 });
 
 chrome.webNavigation.onCommitted.addListener((details) => {

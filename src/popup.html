@@ -1,27 +1,49 @@
 <!DOCTYPE html>
 <html>
+
 <head>
-<meta charset="UTF-8">
-<title>Webel Controls</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <title>Webel Controls</title>
+  <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
 
-<div class="control-section">
-  <label class="toggle-container">
-    <input type="checkbox" id="logging-toggle" checked>
-    <span class="toggle-slider"></span>
-    <span class="toggle-label">logging on</span>
-  </label>
-</div>
+  <div class="control-section">
+    <label class="toggle-container">
+      <input type="checkbox" id="logging-toggle" checked>
+      <span class="toggle-slider"></span>
+      <span class="toggle-label">logging on</span>
+    </label>
+  </div>
 
-<div class="control-section">
-  <button id="export">export parent-child tab data</button>
-  <button id="export-per-tab">export per-tab data</button>
-  <button id="export-session">export session data</button>
-</div>
+  <div class="control-section">
+    <button id="export">export parent-child tab data</button>
+    <button id="export-per-tab">export per-tab data</button>
+    <button id="export-session">export session data</button>
+  </div>
 
 
-<script src="popup.js"></script>
+  <div class="control-section">
+
+    <label for="drive-folder-id">Drive Folder ID:</label>
+
+    <input type="text" id="drive-folder-id" placeholder="Enter Drive folder ID or URL" />
+
+
+  </div>
+
+
+
+
+
+  <div class="control-section">
+
+    <button id="sync-drive">sync to google drive</button>
+
+  </div>
+
+  <script src="popup.js"></script>
 </body>
+
 </html>

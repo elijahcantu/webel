@@ -17,9 +17,17 @@
     "tabs",
     "webNavigation",
     "history",
-    "notifications"
+    "notifications",
+    "identity"
   ],
   "action": {
     "default_popup": "popup.html"
-  }
+  },
+  "oauth2": {
+    "client_id": "697576008157-u5ov2fhfft40hhbilbjktui41piu7fka.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/drive"
+    ]
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwGZLVRjg14arKD2jvxkY8+J/LSBK+0cdYHIrWxlJojQwPxJfvS1te4THM2MbzztEBZWqURkeOCKAgZH6pxJOHL5AbJFqpNRl8IN1KO0hAUdLq4qF3mrDlDpchJacDvRpy5DsfQ00YMAN/WTdkvGj5geBKu/a7eRLhgif7pvwUbds8Fi5VPpOd2XQbb8+mhnzLP0CiVfTr3ZaQAx5Hsq2+Fc3CQgsiW8HqACC9pgY3ppNiRDoWlDo1FZ9JTeOxoacYK8fpvlBIISWFdABDCI6682uBFkAQ+8EvBNMQ+h4DjRg4o6XJSsIsqZ6ata/pDRojQU3w/TQaeoF70Y64Co/AQIDAQAB"
 } 
