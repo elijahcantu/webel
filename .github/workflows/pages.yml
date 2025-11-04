@@ -1,4 +1,4 @@
-name: Deploy Jekyll site to Pages
+name: Deploy Next.js site to Pages
 
 on:
   push:
@@ -21,28 +21,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          ruby-version: '3.3'
-          bundler-cache: true
-          working-directory: docs   # make bundler look inside docs
-          cache-version: 0
+          node-version: '20'
+          cache: 'npm'
 
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v5
 
-      - name: Build with Jekyll
-        working-directory: docs
-        run: bundle exec jekyll build --baseurl "${{ steps.pages.outputs.base_path }}" -d ../_site
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build with Next.js
+        run: npm run build
         env:
-          JEKYLL_ENV: production
+          NODE_ENV: production
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./_site  # we told Jekyll to output here
+          path: ./out
 
   deploy:
     environment:
