@@ -12,16 +12,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
+      
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          ruby-version: '3.3' # Not needed with a .ruby-version file
-          bundler-cache: true # runs 'bundle install' and caches installed gems automatically
-          working-directory: docs
-          cache-version: 0 # Increment this number if you need to re-download cached gems
-      - name: Build with Jekyll
-        working-directory: docs
-        run: bundle exec jekyll build
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build with Next.js
+        run: npm run build
+        env:
+          NODE_ENV: production
 
 
 
