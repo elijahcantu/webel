@@ -5,12 +5,5 @@ export function baseOptions(): BaseLayoutProps {
     nav: {
       title: 'Webel',
     },
-    links: [
-      {
-        text: 'Documentation',
-        url: '/docs',
-        active: 'nested-url',
-      },
-    ],
   };
 }
